@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup } from "firebase/auth";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 import { firebaseClientAuth } from "@/lib/firebase-client";
@@ -12,6 +13,7 @@ export default function LandingPage() {
   const router = useRouter();
   const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
   const [isSigningIn, setIsSigningIn] = useState<boolean>(false);
+  const [isHeaderImageLoaded, setIsHeaderImageLoaded] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   useEffect(() => {
@@ -27,6 +29,24 @@ export default function LandingPage() {
     return () => unsubscribe();
   }, [router]);
 
+  useEffect(() => {
+    const headerImage = new window.Image();
+    headerImage.src = "/Boomie Title.png";
+
+    if (headerImage.complete) {
+      setIsHeaderImageLoaded(true);
+      return;
+    }
+
+    headerImage.onload = () => setIsHeaderImageLoaded(true);
+    headerImage.onerror = () => setIsHeaderImageLoaded(true);
+
+    return () => {
+      headerImage.onload = null;
+      headerImage.onerror = null;
+    };
+  }, []);
+
   async function handleGetStarted(): Promise<void> {
     setErrorMessage("");
     setIsSigningIn(true);
@@ -40,18 +60,28 @@ export default function LandingPage() {
     }
   }
 
+  if (!isHeaderImageLoaded) {
+    return <main className="min-h-screen bg-zinc-100" aria-hidden="true" />;
+  }
+
   return (
     <main className="min-h-screen bg-zinc-100 px-6 py-10 text-zinc-950 sm:px-10">
       <section className="mx-auto flex min-h-[80vh] w-full max-w-5xl flex-col items-center justify-center gap-10 text-center">
         <div className="space-y-5">
-          <h1 className="text-6xl font-black tracking-tight sm:text-8xl">
-            BOOMIE
-          </h1>
+          <h1 className="sr-only">Boomie</h1>
+          <Image
+            src="/Boomie Title.png"
+            alt="Boomie"
+            width={1536}
+            height={652}
+            priority
+            className="mx-auto h-auto w-full max-w-3xl"
+          />
           <p className="mx-auto max-w-2xl text-2xl font-semibold leading-tight sm:text-4xl">
             The album companion for curious listeners.
           </p>
           <p className="mx-auto max-w-lg text-base text-zinc-700 sm:text-lg">
-            One album at a time. One honest vibe check.
+            One album at a time, personalized for you.
           </p>
         </div>
 

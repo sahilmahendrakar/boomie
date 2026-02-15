@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { UnauthorizedError, verifyFirebaseTokenFromRequest } from "@/lib/auth/verify-firebase-token";
 import { listAlbumRatingsForUser, upsertAlbumRatingForUser } from "@/lib/ratings/repository";
-import { type AlbumRatingInput } from "@/lib/ratings/types";
+import { ALBUM_RATING_IDS, type AlbumRatingInput } from "@/lib/ratings/types";
 
 class BadRequestError extends Error {
   constructor(message: string) {
@@ -26,8 +26,8 @@ function validateRatingPayload(payload: unknown): AlbumRatingInput {
     throw new BadRequestError("albumName must be a non-empty string up to 200 characters");
   }
 
-  if (typeof rating !== "number" || !Number.isFinite(rating) || rating < 0 || rating > 5) {
-    throw new BadRequestError("rating must be a number between 0 and 5");
+  if (typeof rating !== "string" || !ALBUM_RATING_IDS.includes(rating as (typeof ALBUM_RATING_IDS)[number])) {
+    throw new BadRequestError(`rating must be one of: ${ALBUM_RATING_IDS.join(", ")}`);
   }
 
   if (notes !== undefined && typeof notes !== "string") {
@@ -38,9 +38,11 @@ function validateRatingPayload(payload: unknown): AlbumRatingInput {
     throw new BadRequestError("notes must be 2000 characters or fewer");
   }
 
+  const normalizedRating = rating as AlbumRatingInput["rating"];
+
   return {
     albumName: albumName.trim(),
-    rating,
+    rating: normalizedRating,
     notes: typeof notes === "string" ? notes.trim() : "",
   };
 }

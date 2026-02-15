@@ -1,5 +1,6 @@
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_SEARCH_URL = "https://api.spotify.com/v1/search";
+const SPOTIFY_ALBUMS_URL = "https://api.spotify.com/v1/albums";
 
 type SpotifyTokenResponse = {
   access_token: string;
@@ -16,6 +17,13 @@ type SpotifySearchResponse = {
       images?: Array<{ url: string; width?: number; height?: number }>;
     }>;
   };
+};
+
+type SpotifyAlbumByIdResponse = {
+  id: string;
+  name: string;
+  artists: Array<{ name: string }>;
+  images?: Array<{ url: string; width?: number; height?: number }>;
 };
 
 export type SpotifyAlbumMatch = {
@@ -142,6 +150,69 @@ async function searchAlbums(query: string): Promise<SpotifyAlbumMatch[]> {
   }));
   console.info("[spotify/client] search_finished", { query, resultCount: items.length });
   return items;
+}
+
+export async function searchSpotifyAlbums(query: string, limit = 5): Promise<SpotifyAlbumMatch[]> {
+  console.info("[spotify/client] search_tool_started", { query, limit });
+  const token = await getSpotifyAccessToken();
+  const params = new URLSearchParams({
+    q: query,
+    type: "album",
+    limit: String(Math.max(1, Math.min(limit, 20))),
+  });
+
+  const response = await fetch(`${SPOTIFY_SEARCH_URL}?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    console.error("[spotify/client] search_tool_failed", { query, status: response.status });
+    throw new Error("Failed to query Spotify albums");
+  }
+
+  const payload = (await response.json()) as SpotifySearchResponse;
+  const items = (payload.albums?.items ?? []).map((item) => ({
+    id: item.id,
+    name: item.name,
+    artistName: item.artists[0]?.name ?? "Unknown Artist",
+    imageUrl: item.images?.[0]?.url ?? "",
+  }));
+  console.info("[spotify/client] search_tool_finished", { query, resultCount: items.length });
+  return items;
+}
+
+export async function getSpotifyAlbumById(spotifyAlbumId: string): Promise<SpotifyAlbumMatch | null> {
+  console.info("[spotify/client] get_album_started", { spotifyAlbumId });
+  const token = await getSpotifyAccessToken();
+  const response = await fetch(`${SPOTIFY_ALBUMS_URL}/${encodeURIComponent(spotifyAlbumId)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  if (response.status === 404) {
+    console.warn("[spotify/client] get_album_not_found", { spotifyAlbumId });
+    return null;
+  }
+
+  if (!response.ok) {
+    console.error("[spotify/client] get_album_failed", { spotifyAlbumId, status: response.status });
+    throw new Error("Failed to fetch Spotify album by id");
+  }
+
+  const payload = (await response.json()) as SpotifyAlbumByIdResponse;
+  const album = {
+    id: payload.id,
+    name: payload.name,
+    artistName: payload.artists[0]?.name ?? "Unknown Artist",
+    imageUrl: payload.images?.[0]?.url ?? "",
+  };
+  console.info("[spotify/client] get_album_finished", { spotifyAlbumId, found: true });
+  return album;
 }
 
 export async function findSpotifyAlbum(albumName: string, artistName: string): Promise<SpotifyAlbumMatch | null> {

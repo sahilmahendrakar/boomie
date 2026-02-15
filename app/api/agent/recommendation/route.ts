@@ -8,7 +8,44 @@ import {
 } from "@/lib/recommendations/repository";
 import { type CurrentRecommendationInput } from "@/lib/recommendations/types";
 import { listAlbumRatingsForUser } from "@/lib/ratings/repository";
-import { findSpotifyAlbum } from "@/lib/spotify/client";
+import { getSpotifyAlbumById } from "@/lib/spotify/client";
+import { getUserGoals } from "@/lib/user-goals/repository";
+
+class BadRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BadRequestError";
+  }
+}
+
+type RecommendationPostPayload = {
+  nextPickSteering: string;
+};
+
+async function parseRecommendationPostPayload(request: NextRequest): Promise<RecommendationPostPayload> {
+  let payload: unknown;
+
+  try {
+    payload = await request.json();
+  } catch {
+    throw new BadRequestError("Invalid request body");
+  }
+
+  if (!payload || typeof payload !== "object") {
+    throw new BadRequestError("Invalid request body");
+  }
+
+  const { nextPickSteering } = payload as { nextPickSteering?: unknown };
+  if (nextPickSteering !== undefined && typeof nextPickSteering !== "string") {
+    throw new BadRequestError("nextPickSteering must be a string when provided");
+  }
+
+  const normalizedSteering = typeof nextPickSteering === "string" ? nextPickSteering.trim() : "";
+
+  return {
+    nextPickSteering: normalizedSteering,
+  };
+}
 
 function toRecommendationResponse(recommendation: CurrentRecommendationInput) {
   return {
@@ -25,8 +62,10 @@ function toRecommendationResponse(recommendation: CurrentRecommendationInput) {
 async function generateVerifiedRecommendation(
   uid: string,
   requestId: string,
+  extraInstructions?: string[],
 ): Promise<CurrentRecommendationInput | null> {
   const ratings = await listAlbumRatingsForUser(uid);
+  const userGoals = await getUserGoals(uid);
   console.info("[api/recommendation] ratings_loaded", { requestId, uid, ratingsCount: ratings.length });
 
   if (ratings.length === 0) {
@@ -34,80 +73,42 @@ async function generateVerifiedRecommendation(
     return null;
   }
 
-  console.info("[api/recommendation] generation_attempt_started", { requestId, attempt: 1 });
-  const firstDraft = await generateBoomieRecommendation(ratings);
-  console.info("[api/recommendation] generation_attempt_finished", {
+  console.info("[api/recommendation] generation_started", { requestId });
+  const draft = await generateBoomieRecommendation(ratings, {
+    extraInstructions,
+    userGoalsContext: userGoals
+      ? {
+          selectedGoals: userGoals.selectedGoals,
+          notes: userGoals.notes,
+        }
+      : undefined,
+  });
+  console.info("[api/recommendation] generation_finished", {
     requestId,
-    attempt: 1,
-    albumName: firstDraft.recommendedAlbumName,
-    artistName: firstDraft.recommendedArtistName,
+    spotifyAlbumId: draft.spotifyAlbumId,
   });
 
-  console.info("[api/recommendation] spotify_lookup_started", {
+  console.info("[api/recommendation] spotify_hydration_started", { requestId, spotifyAlbumId: draft.spotifyAlbumId });
+  const album = await getSpotifyAlbumById(draft.spotifyAlbumId);
+  console.info("[api/recommendation] spotify_hydration_finished", {
     requestId,
-    attempt: 1,
-    albumName: firstDraft.recommendedAlbumName,
-    artistName: firstDraft.recommendedArtistName,
-  });
-  const firstAlbum = await findSpotifyAlbum(firstDraft.recommendedAlbumName, firstDraft.recommendedArtistName);
-  console.info("[api/recommendation] spotify_lookup_finished", {
-    requestId,
-    attempt: 1,
-    matched: Boolean(firstAlbum),
-    spotifyAlbumId: firstAlbum?.id,
+    matched: Boolean(album),
+    spotifyAlbumId: draft.spotifyAlbumId,
   });
 
-  let finalDraft = firstDraft;
-  let finalAlbum = firstAlbum;
-
-  if (!finalAlbum) {
-    console.warn("[api/recommendation] retry_started", { requestId, previousAttempt: 1 });
-    const retryDraft = await generateBoomieRecommendation(ratings, {
-      extraInstructions: [
-        `Do not recommend "${firstDraft.recommendedAlbumName}" by "${firstDraft.recommendedArtistName}".`,
-        "Choose a widely released album by a well-known artist and spell artist and album exactly.",
-      ],
-    });
-    console.info("[api/recommendation] generation_attempt_finished", {
-      requestId,
-      attempt: 2,
-      albumName: retryDraft.recommendedAlbumName,
-      artistName: retryDraft.recommendedArtistName,
-    });
-
-    console.info("[api/recommendation] spotify_lookup_started", {
-      requestId,
-      attempt: 2,
-      albumName: retryDraft.recommendedAlbumName,
-      artistName: retryDraft.recommendedArtistName,
-    });
-    const retryAlbum = await findSpotifyAlbum(retryDraft.recommendedAlbumName, retryDraft.recommendedArtistName);
-    console.info("[api/recommendation] spotify_lookup_finished", {
-      requestId,
-      attempt: 2,
-      matched: Boolean(retryAlbum),
-      spotifyAlbumId: retryAlbum?.id,
-    });
-    if (retryAlbum) {
-      finalDraft = retryDraft;
-      finalAlbum = retryAlbum;
-      console.info("[api/recommendation] retry_succeeded", { requestId, spotifyAlbumId: retryAlbum.id });
-    }
-  }
-
-  if (!finalAlbum) {
-    console.error("[api/recommendation] spotify_verification_failed", { requestId, uid });
+  if (!album) {
+    console.error("[api/recommendation] spotify_hydration_failed", { requestId, uid, spotifyAlbumId: draft.spotifyAlbumId });
     throw new Error("Could not verify a Spotify album for the recommendation. Please try again.");
   }
 
   return {
-    tagline: finalDraft.tagline,
-    albumDescription: finalDraft.albumDescription,
-    whyForUser: finalDraft.whyForUser,
-    spotifyAlbumImageUrl: finalAlbum.imageUrl,
-    spotifyAlbumId: finalAlbum.id,
-    spotifyAlbumName: finalAlbum.name,
-    spotifyArtistName: finalAlbum.artistName,
+    tagline: draft.tagline,
+    albumDescription: draft.albumDescription,
+    whyForUser: draft.whyForUser,
+    spotifyAlbumImageUrl: album.imageUrl,
+    spotifyAlbumId: album.id,
+    spotifyAlbumName: album.name,
+    spotifyArtistName: album.artistName,
   };
 }
 
@@ -165,7 +166,12 @@ export async function POST(request: NextRequest) {
     const uid = await verifyFirebaseTokenFromRequest(request);
     console.info("[api/recommendation][post] auth_verified", { requestId, uid });
 
-    const generated = await generateVerifiedRecommendation(uid, requestId);
+    const payload = await parseRecommendationPostPayload(request);
+    const extraInstructions =
+      payload.nextPickSteering.length > 0
+        ? [`Use this optional preference for the next pick only: ${payload.nextPickSteering}`]
+        : undefined;
+    const generated = await generateVerifiedRecommendation(uid, requestId, extraInstructions);
     if (!generated) {
       return NextResponse.json(
         { error: "Add at least one album rating before requesting a recommendation." },
@@ -186,6 +192,11 @@ export async function POST(request: NextRequest) {
     if (error instanceof UnauthorizedError) {
       console.warn("[api/recommendation][post] unauthorized", { requestId, error: error.message });
       return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+
+    if (error instanceof BadRequestError) {
+      console.warn("[api/recommendation][post] bad_request", { requestId, error: error.message });
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
     const message = error instanceof Error ? error.message : "Failed to generate recommendation";

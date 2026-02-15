@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { GoogleAuthProvider, User, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { User, onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "next/navigation";
 
 import { firebaseClientAuth } from "@/lib/firebase-client";
@@ -11,21 +11,19 @@ type RatingOption = {
   label: string;
   emoji: string;
   colorClass: string;
-  score: number;
 };
 
 const ratingOptions: RatingOption[] = [
-  { id: "hated", label: "Hated it", emoji: "😖", colorClass: "hover:border-rose-300 hover:bg-rose-50", score: 1 },
-  { id: "disliked", label: "Disliked", emoji: "🙃", colorClass: "hover:border-orange-300 hover:bg-orange-50", score: 2 },
-  { id: "neutral", label: "Neutral", emoji: "😐", colorClass: "hover:border-zinc-300 hover:bg-zinc-100", score: 3 },
-  { id: "liked", label: "Liked it", emoji: "🙂", colorClass: "hover:border-emerald-300 hover:bg-emerald-50", score: 4 },
-  { id: "loved", label: "Loved it", emoji: "🤩", colorClass: "hover:border-fuchsia-300 hover:bg-fuchsia-50", score: 5 },
+  { id: "hated", label: "Hated it", emoji: "😖", colorClass: "hover:border-rose-300 hover:bg-rose-50" },
+  { id: "disliked", label: "Disliked", emoji: "🙃", colorClass: "hover:border-orange-300 hover:bg-orange-50" },
+  { id: "neutral", label: "Neutral", emoji: "😐", colorClass: "hover:border-zinc-300 hover:bg-zinc-100" },
+  { id: "liked", label: "Liked it", emoji: "🙂", colorClass: "hover:border-emerald-300 hover:bg-emerald-50" },
+  { id: "loved", label: "Loved it", emoji: "🤩", colorClass: "hover:border-fuchsia-300 hover:bg-fuchsia-50" },
   {
     id: "did-not-listen",
     label: "Did not listen",
     emoji: "🫥",
     colorClass: "hover:border-sky-300 hover:bg-sky-50",
-    score: 0,
   },
 ];
 
@@ -39,6 +37,13 @@ type Recommendation = {
   spotifyArtistName: string;
 };
 
+type UserGoalsResponse = {
+  goals: {
+    selectedGoals: string[];
+  } | null;
+  error?: string;
+};
+
 const defaultRecommendation: Recommendation = {
   tagline: "Electronic • 2001 • 14 tracks",
   albumDescription:
@@ -50,16 +55,16 @@ const defaultRecommendation: Recommendation = {
   spotifyArtistName: "Daft Punk",
 };
 
-const GOOGLE_PROVIDER = new GoogleAuthProvider();
-
 export default function Home() {
   const router = useRouter();
   const [selectedRating, setSelectedRating] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
+  const [nextPickSteering, setNextPickSteering] = useState<string>("");
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
+  const [hasGoals, setHasGoals] = useState<boolean | null>(null);
   const [isInitialRecommendationLoading, setIsInitialRecommendationLoading] = useState<boolean>(false);
   const [isGeneratingNextRecommendation, setIsGeneratingNextRecommendation] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string>("");
@@ -67,86 +72,112 @@ export default function Home() {
 
   const selectedOption = ratingOptions.find((option) => option.id === selectedRating);
   const isRecommendationLoading = isInitialRecommendationLoading || isGeneratingNextRecommendation;
-  const canSave = Boolean(user && selectedOption && !isSaving && !isRecommendationLoading);
+  const canGetNextPick = Boolean(user && selectedOption && !isSaving && !isRecommendationLoading);
   const displayedRecommendation = recommendation ?? defaultRecommendation;
   const spotifyAlbumUrl = displayedRecommendation.spotifyAlbumId
     ? `https://open.spotify.com/album/${displayedRecommendation.spotifyAlbumId}`
     : "https://open.spotify.com/";
-  const shouldShowLoader = Boolean(user && isRecommendationLoading);
+  const shouldShowLoader = Boolean(user && (hasGoals !== true || isRecommendationLoading));
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseClientAuth, (nextUser) => {
       setUser(nextUser);
       setIsAuthLoading(false);
       if (!nextUser) {
+        setHasGoals(null);
         router.replace("/landing");
+        return;
       }
+
+      setHasGoals(null);
     });
 
     return () => unsubscribe();
   }, [router]);
 
-  async function signInWithGoogle(): Promise<void> {
-    setErrorMessage("");
-    setStatusMessage("");
-
-    try {
-      await signInWithPopup(firebaseClientAuth, GOOGLE_PROVIDER);
-      setStatusMessage("Signed in with Google.");
-    } catch {
-      setErrorMessage("Failed to sign in with Google.");
-    }
-  }
-
-  async function signOutCurrentUser(): Promise<void> {
-    setErrorMessage("");
-    setStatusMessage("");
-
-    try {
-      await signOut(firebaseClientAuth);
-      setRecommendation(null);
-      router.replace("/landing");
-    } catch {
-      setErrorMessage("Failed to sign out.");
-    }
-  }
-
-  const generateNextRecommendation = useCallback(async (): Promise<void> => {
-    if (!user) {
-      throw new Error("Please sign in first.");
-    }
-
-    setIsGeneratingNextRecommendation(true);
-    setErrorMessage("");
-    setStatusMessage("Rating saved. Boomie is digging for your next gem...");
-
-    try {
-      const token = await user.getIdToken();
-      const response = await fetch("/api/agent/recommendation", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const responseBody = (await response.json()) as { error?: string };
-        throw new Error(responseBody.error ?? "Failed to fetch recommendation");
+  useEffect(() => {
+    async function checkGoalsForUser(): Promise<void> {
+      if (!user) {
+        return;
       }
 
-      const responseBody = (await response.json()) as Recommendation;
-      setRecommendation(responseBody);
-      setSelectedRating("");
-      setNotes("");
-      setStatusMessage("Fresh pick unlocked. Give it a spin and rate it!");
-    } finally {
-      setIsGeneratingNextRecommendation(false);
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch("/api/user/goals", {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          const responseBody = (await response.json()) as UserGoalsResponse;
+          throw new Error(responseBody.error ?? "Failed to load goals");
+        }
+
+        const responseBody = (await response.json()) as UserGoalsResponse;
+        const hasSavedGoals = Boolean(responseBody.goals?.selectedGoals?.length);
+        setHasGoals(hasSavedGoals);
+        if (!hasSavedGoals) {
+          router.replace("/onboarding/goals");
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load goals";
+        setErrorMessage(message);
+        setHasGoals(true);
+      }
     }
-  }, [user]);
+
+    if (!isAuthLoading && user) {
+      void checkGoalsForUser();
+    }
+  }, [isAuthLoading, router, user]);
+
+  const generateNextRecommendation = useCallback(
+    async (steeringInstruction?: string): Promise<void> => {
+      if (!user) {
+        throw new Error("Please sign in first.");
+      }
+
+      setIsGeneratingNextRecommendation(true);
+      setErrorMessage("");
+      setStatusMessage("Rating saved. Boomie is digging for your next gem...");
+
+      try {
+        const token = await user.getIdToken();
+        const trimmedSteering = steeringInstruction?.trim() ?? "";
+        const response = await fetch("/api/agent/recommendation", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            nextPickSteering: trimmedSteering,
+          }),
+        });
+
+        if (!response.ok) {
+          const responseBody = (await response.json()) as { error?: string };
+          throw new Error(responseBody.error ?? "Failed to fetch recommendation");
+        }
+
+        const responseBody = (await response.json()) as Recommendation;
+        setRecommendation(responseBody);
+        setSelectedRating("");
+        setNotes("");
+        setNextPickSteering("");
+        setStatusMessage("Fresh pick unlocked. Give it a spin and rate it!");
+      } finally {
+        setIsGeneratingNextRecommendation(false);
+      }
+    },
+    [user],
+  );
 
   async function saveRating(): Promise<void> {
     if (!selectedOption) {
-      setErrorMessage("Select a rating before saving.");
+      setErrorMessage("Select a rating before getting your next pick.");
       return;
     }
     if (!user) {
@@ -169,7 +200,7 @@ export default function Home() {
         },
         body: JSON.stringify({
           albumName: displayedRecommendation.spotifyAlbumName,
-          rating: selectedOption.score,
+          rating: selectedOption.id,
           notes,
         }),
       });
@@ -180,7 +211,7 @@ export default function Home() {
       }
 
       didPersistRating = true;
-      await generateNextRecommendation();
+      await generateNextRecommendation(nextPickSteering);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save rating";
       if (didPersistRating) {
@@ -229,17 +260,15 @@ export default function Home() {
   }, [user]);
 
   useEffect(() => {
-    if (!user || recommendation || isInitialRecommendationLoading) {
+    if (!user || hasGoals !== true || recommendation || isInitialRecommendationLoading) {
       return;
     }
 
     void fetchCurrentRecommendation();
-  }, [user, recommendation, isInitialRecommendationLoading, fetchCurrentRecommendation]);
+  }, [user, hasGoals, recommendation, isInitialRecommendationLoading, fetchCurrentRecommendation]);
 
   if (shouldShowLoader) {
-    const loaderTitle = isInitialRecommendationLoading
-      ? "Boomie is digging through record crates..."
-      : "Boomie is sketching your next adventure album...";
+    const loaderTitle ="Boomie is digging through record crates...";
 
     return (
       <main className="min-h-screen bg-zinc-100 px-6 py-10 text-zinc-950 sm:px-10">
@@ -347,14 +376,20 @@ export default function Home() {
               className="w-full resize-none rounded-xl border-2 border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-200"
             />
           </label>
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={nextPickSteering}
+              onChange={(event) => setNextPickSteering(event.target.value)}
+              placeholder="Steer next pick..."
+              className="w-full rounded-full border-2 border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-200"
+            />
             <button
               type="button"
               onClick={saveRating}
-              disabled={!canSave}
-              className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!canGetNextPick}
+              className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 sm:shrink-0"
             >
-              {isSaving ? "Saving rating..." : "Save rating"}
+              {isSaving ? "Saving..." : "Get your next pick"}
             </button>
           </div>
         </section>
@@ -369,27 +404,6 @@ export default function Home() {
           </div>
         )}
 
-        <footer className="w-full text-right">
-          {isAuthLoading ? (
-            <span className="text-sm text-zinc-500">Checking session...</span>
-          ) : user ? (
-            <button
-              type="button"
-              onClick={signOutCurrentUser}
-              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-            >
-              Sign out
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={signInWithGoogle}
-              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-            >
-              Sign in with Google
-            </button>
-          )}
-        </footer>
       </div>
     </main>
   );

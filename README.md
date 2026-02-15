@@ -58,13 +58,14 @@ Auth for both endpoints: Firebase ID token in `Authorization: Bearer <token>`.
 Behavior:
 - Reads the signed-in user's current persisted recommendation from Firestore.
 - If one exists, returns it immediately.
-- If none exists, generates one from the user's rating history, verifies it with Spotify, persists it as current, and returns it.
+- If none exists, generates one from the user's rating history with AI SDK tool calling, hydrates it from Spotify by album ID, persists it as current, and returns it.
 
 ### `POST /api/agent/recommendation`
 
 Behavior:
 - Always generates the next recommendation from the user's rating history.
-- Verifies album existence through Spotify Web API.
+- Uses AI SDK tool calls to search Spotify albums and select a recommendation by Spotify album ID.
+- Hydrates album metadata through Spotify Web API by album ID.
 - Persists that recommendation as the user's new current recommendation.
 - Returns the new current recommendation.
 
@@ -87,3 +88,14 @@ Response shape:
 When a user saves a rating, the frontend should:
 1. call `POST /api/ratings` and wait for success
 2. then call `POST /api/agent/recommendation` to rotate to the next recommendation
+
+## Ratings API Payload
+
+`POST /api/ratings` expects `rating` as one of:
+
+- `hated`
+- `disliked`
+- `neutral`
+- `liked`
+- `loved`
+- `did-not-listen`

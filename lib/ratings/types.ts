@@ -1,14 +1,25 @@
 import { Timestamp } from "firebase-admin/firestore";
 
+export const ALBUM_RATING_IDS = [
+  "hated",
+  "disliked",
+  "neutral",
+  "liked",
+  "loved",
+  "did-not-listen",
+] as const;
+
+export type AlbumRatingId = (typeof ALBUM_RATING_IDS)[number];
+
 export type AlbumRatingInput = {
   albumName: string;
-  rating: number;
+  rating: AlbumRatingId;
   notes: string;
 };
 
 export type AlbumRatingFirestoreDoc = {
   albumName: string;
-  rating: number;
+  rating: AlbumRatingId;
   notes: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -17,7 +28,7 @@ export type AlbumRatingFirestoreDoc = {
 export type AlbumRating = {
   id: string;
   albumName: string;
-  rating: number;
+  rating: AlbumRatingId;
   notes: string;
   createdAt: string;
   updatedAt: string;
