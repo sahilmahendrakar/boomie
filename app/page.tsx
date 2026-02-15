@@ -77,7 +77,7 @@ export default function Home() {
   const spotifyAlbumUrl = displayedRecommendation.spotifyAlbumId
     ? `https://open.spotify.com/album/${displayedRecommendation.spotifyAlbumId}`
     : "https://open.spotify.com/";
-  const shouldShowLoader = Boolean(user && (hasGoals !== true || isRecommendationLoading));
+  const shouldShowLoader = isAuthLoading || !user || hasGoals !== true || isRecommendationLoading;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseClientAuth, (nextUser) => {
