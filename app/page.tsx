@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { GoogleAuthProvider, User, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { useRouter } from "next/navigation";
 
 import { firebaseClientAuth } from "@/lib/firebase-client";
 
@@ -28,47 +29,62 @@ const ratingOptions: RatingOption[] = [
   },
 ];
 
-type AlbumRating = {
-  id: string;
-  albumName: string;
-  rating: number;
-  notes: string;
-  createdAt: string;
-  updatedAt: string;
+type Recommendation = {
+  tagline: string;
+  albumDescription: string;
+  whyForUser: string;
+  spotifyAlbumImageUrl?: string;
+  spotifyAlbumId: string;
+  spotifyAlbumName: string;
+  spotifyArtistName: string;
+};
+
+const defaultRecommendation: Recommendation = {
+  tagline: "Electronic • 2001 • 14 tracks",
+  albumDescription:
+    "A sleek, groove-forward electronic classic that balances robot-pop hooks with dancefloor momentum.",
+  whyForUser: "It matches your upbeat energy and preference for polished, melodic production.",
+  spotifyAlbumImageUrl: "",
+  spotifyAlbumId: "",
+  spotifyAlbumName: "Discovery",
+  spotifyArtistName: "Daft Punk",
 };
 
 const GOOGLE_PROVIDER = new GoogleAuthProvider();
 
 export default function Home() {
+  const router = useRouter();
   const [selectedRating, setSelectedRating] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
-  const [history, setHistory] = useState<AlbumRating[]>([]);
+  const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
+  const [isInitialRecommendationLoading, setIsInitialRecommendationLoading] = useState<boolean>(false);
+  const [isGeneratingNextRecommendation, setIsGeneratingNextRecommendation] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   const selectedOption = ratingOptions.find((option) => option.id === selectedRating);
-  const canSave = Boolean(user && selectedOption && !isSaving);
+  const isRecommendationLoading = isInitialRecommendationLoading || isGeneratingNextRecommendation;
+  const canSave = Boolean(user && selectedOption && !isSaving && !isRecommendationLoading);
+  const displayedRecommendation = recommendation ?? defaultRecommendation;
+  const spotifyAlbumUrl = displayedRecommendation.spotifyAlbumId
+    ? `https://open.spotify.com/album/${displayedRecommendation.spotifyAlbumId}`
+    : "https://open.spotify.com/";
+  const shouldShowLoader = Boolean(user && isRecommendationLoading);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseClientAuth, (nextUser) => {
       setUser(nextUser);
       setIsAuthLoading(false);
+      if (!nextUser) {
+        router.replace("/landing");
+      }
     });
 
     return () => unsubscribe();
-  }, []);
-
-  async function getAuthToken(): Promise<string> {
-    if (!user) {
-      throw new Error("Please sign in first.");
-    }
-
-    return user.getIdToken();
-  }
+  }, [router]);
 
   async function signInWithGoogle(): Promise<void> {
     setErrorMessage("");
@@ -88,25 +104,63 @@ export default function Home() {
 
     try {
       await signOut(firebaseClientAuth);
-      setHistory([]);
-      setStatusMessage("Signed out.");
+      setRecommendation(null);
+      router.replace("/landing");
     } catch {
       setErrorMessage("Failed to sign out.");
     }
   }
+
+  const generateNextRecommendation = useCallback(async (): Promise<void> => {
+    if (!user) {
+      throw new Error("Please sign in first.");
+    }
+
+    setIsGeneratingNextRecommendation(true);
+    setErrorMessage("");
+    setStatusMessage("Rating saved. Boomie is digging for your next gem...");
+
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/agent/recommendation", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const responseBody = (await response.json()) as { error?: string };
+        throw new Error(responseBody.error ?? "Failed to fetch recommendation");
+      }
+
+      const responseBody = (await response.json()) as Recommendation;
+      setRecommendation(responseBody);
+      setSelectedRating("");
+      setNotes("");
+      setStatusMessage("Fresh pick unlocked. Give it a spin and rate it!");
+    } finally {
+      setIsGeneratingNextRecommendation(false);
+    }
+  }, [user]);
 
   async function saveRating(): Promise<void> {
     if (!selectedOption) {
       setErrorMessage("Select a rating before saving.");
       return;
     }
+    if (!user) {
+      setErrorMessage("Please sign in first.");
+      return;
+    }
 
     setIsSaving(true);
     setErrorMessage("");
     setStatusMessage("");
+    let didPersistRating = false;
 
     try {
-      const token = await getAuthToken();
+      const token = await user.getIdToken();
       const response = await fetch("/api/ratings", {
         method: "POST",
         headers: {
@@ -114,7 +168,7 @@ export default function Home() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          albumName: "Discovery",
+          albumName: displayedRecommendation.spotifyAlbumName,
           rating: selectedOption.score,
           notes,
         }),
@@ -125,24 +179,33 @@ export default function Home() {
         throw new Error(responseBody.error ?? "Failed to save rating");
       }
 
-      setStatusMessage("Rating saved.");
-      await loadHistory();
+      didPersistRating = true;
+      await generateNextRecommendation();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save rating";
-      setErrorMessage(message);
+      if (didPersistRating) {
+        setErrorMessage(`Rating saved, but ${message}`);
+      } else {
+        setErrorMessage(message);
+      }
     } finally {
       setIsSaving(false);
     }
   }
 
-  async function loadHistory(): Promise<void> {
-    setIsLoadingHistory(true);
+  const fetchCurrentRecommendation = useCallback(async (): Promise<void> => {
+    if (!user) {
+      setErrorMessage("Please sign in first.");
+      return;
+    }
+
+    setIsInitialRecommendationLoading(true);
     setErrorMessage("");
     setStatusMessage("");
 
     try {
-      const token = await getAuthToken();
-      const response = await fetch("/api/ratings", {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/agent/recommendation", {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -151,179 +214,154 @@ export default function Home() {
 
       if (!response.ok) {
         const responseBody = (await response.json()) as { error?: string };
-        throw new Error(responseBody.error ?? "Failed to load history");
+        throw new Error(responseBody.error ?? "Failed to generate recommendation");
       }
 
-      const responseBody = (await response.json()) as { ratings: AlbumRating[] };
-      setHistory(responseBody.ratings);
-      setStatusMessage("Loaded rating history.");
+      const responseBody = (await response.json()) as Recommendation;
+      setRecommendation(responseBody);
+      setStatusMessage("Your recommendation is ready.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load history";
+      const message = error instanceof Error ? error.message : "Failed to fetch recommendation";
       setErrorMessage(message);
     } finally {
-      setIsLoadingHistory(false);
+      setIsInitialRecommendationLoading(false);
     }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || recommendation || isInitialRecommendationLoading) {
+      return;
+    }
+
+    void fetchCurrentRecommendation();
+  }, [user, recommendation, isInitialRecommendationLoading, fetchCurrentRecommendation]);
+
+  if (shouldShowLoader) {
+    const loaderTitle = isInitialRecommendationLoading
+      ? "Boomie is digging through record crates..."
+      : "Boomie is sketching your next adventure album...";
+
+    return (
+      <main className="min-h-screen bg-zinc-100 px-6 py-10 text-zinc-950 sm:px-10">
+        <div className="mx-auto flex min-h-[80vh] w-full max-w-3xl items-center justify-center">
+          <section className="relative w-full rounded-[2rem] border-2 border-black bg-white px-8 py-12 text-center shadow-[10px_10px_0px_0px_#000]">
+            <div className="pointer-events-none absolute -left-3 -top-3 h-8 w-8 rounded-full border-2 border-black bg-yellow-300 motion-safe:animate-bounce motion-reduce:animate-none" />
+            <div className="pointer-events-none absolute -right-2 top-10 h-6 w-6 rounded-full border-2 border-black bg-pink-300 motion-safe:animate-pulse motion-reduce:animate-none" />
+            <div className="pointer-events-none absolute -bottom-3 right-8 h-10 w-10 rounded-full border-2 border-black bg-emerald-300 motion-safe:animate-ping motion-reduce:animate-none" />
+            <p className="text-sm font-medium uppercase tracking-[0.22em] text-zinc-500">Loading groove</p>
+            <h1 className="mt-3 text-3xl font-black leading-tight sm:text-4xl">{loaderTitle}</h1>
+            <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-zinc-700">
+              Hold tight while Boomie flips through cosmic vinyl, checks your vibe history, and lines up a deliciously
+              good next listen.
+            </p>
+            <div className="mt-7 flex items-center justify-center gap-2">
+              <span className="h-3 w-3 rounded-full border border-black bg-violet-300 motion-safe:animate-bounce motion-reduce:animate-none" />
+              <span className="h-3 w-3 rounded-full border border-black bg-sky-300 motion-safe:animate-bounce motion-reduce:animate-none [animation-delay:120ms]" />
+              <span className="h-3 w-3 rounded-full border border-black bg-orange-300 motion-safe:animate-bounce motion-reduce:animate-none [animation-delay:240ms]" />
+            </div>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-violet-50 via-white to-cyan-50 px-4 py-10 text-zinc-900 sm:px-8">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-7">
-        <header className="space-y-4 text-center">
-          <p className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/85 px-4 py-1 text-sm font-medium shadow-sm backdrop-blur">
-            <span>📻😎</span>
-            <span>Boomie gives one rec at a time</span>
-          </p>
-          <h1 className="text-4xl font-black tracking-tight sm:text-6xl">
-            One album.
-            <br />
-            One vibe check.
-          </h1>
-          <p className="mx-auto max-w-xl text-sm leading-6 text-zinc-600 sm:text-base">
-            Meet <span className="font-semibold text-zinc-800">Boomie</span>, your sunglass-wearing boombox DJ. Spin the
-            album, rate the mood, leave a note, and keep it moving.
-          </p>
+    <main className="min-h-screen bg-zinc-100 px-6 py-10 text-zinc-950 sm:px-10">
+      <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-6 text-center">
+        <header className="space-y-2">
+          <p className="text-sm font-medium uppercase tracking-[0.22em] text-zinc-500">Boomie Pick</p>
+          <h1 className="text-3xl font-black leading-tight sm:text-5xl">{displayedRecommendation.tagline}</h1>
         </header>
 
-        <section className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-xl shadow-violet-100 backdrop-blur sm:p-7">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200 bg-white p-3">
-            <div className="text-sm text-zinc-600">
-              {isAuthLoading
-                ? "Checking sign-in status..."
-                : user
-                  ? `Signed in as ${user.email ?? user.uid}`
-                  : "You are not signed in"}
-            </div>
-            {user ? (
-              <button
-                type="button"
-                onClick={signOutCurrentUser}
-                className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
-              >
-                Sign out
-              </button>
+        <section className="w-full max-w-md">
+          <div className="relative overflow-hidden rounded-3xl border-2 border-black bg-white shadow-[6px_6px_0px_0px_#000]">
+            {displayedRecommendation.spotifyAlbumImageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- Spotify image URLs are dynamic.
+              <img
+                src={displayedRecommendation.spotifyAlbumImageUrl}
+                alt={`${displayedRecommendation.spotifyAlbumName} cover art`}
+                className="aspect-square h-full w-full object-cover"
+              />
             ) : (
-              <button
-                type="button"
-                onClick={signInWithGoogle}
-                className="rounded-full border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100"
-              >
-                Sign in with Google
-              </button>
+              <div className="aspect-square bg-[radial-gradient(circle_at_25%_20%,_#c4b5fd,_#ffffff_55%)]" />
             )}
           </div>
+        </section>
 
-          <div className="grid gap-6 sm:grid-cols-[1.15fr_1fr]">
-            <div>
-              <div
-                className="relative aspect-square overflow-hidden rounded-2xl border border-zinc-900/10 bg-[radial-gradient(circle_at_top_right,_#c4b5fd,_#ecfeff_45%,_#ffffff_75%)] p-6 shadow-lg"
-                aria-label="Recommended album artwork"
-              >
-                <div className="absolute left-5 top-5 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold tracking-wide text-white">
-                  BOOMIE PICK
-                </div>
-                <div className="absolute right-5 top-5 text-3xl">📻😎</div>
-                <div className="mt-16 space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-600">Today&apos;s recommendation</p>
-                  <h2 className="text-3xl font-black leading-tight text-zinc-900">Discovery</h2>
-                  <p className="text-lg font-medium text-zinc-700">Daft Punk</p>
-                </div>
-                <div className="absolute bottom-5 left-5 rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-xs font-medium text-zinc-700 backdrop-blur">
-                  Electronic • 2001 • 14 tracks
-                </div>
-              </div>
-            </div>
+        <section className="space-y-1">
+          <h2 className="text-3xl font-black sm:text-4xl">{displayedRecommendation.spotifyAlbumName}</h2>
+          <p className="text-lg font-semibold text-zinc-700">{displayedRecommendation.spotifyArtistName}</p>
+          <a
+            href={spotifyAlbumUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open album in Spotify"
+            className="mx-auto inline-flex items-center justify-center transition hover:scale-105"
+          >
+            <svg viewBox="0 0 24 24" className="h-7 w-7" aria-hidden="true">
+              <circle cx="12" cy="12" r="11" fill="#1DB954" />
+              <path d="M6.2 9.4c3.8-1.1 8.2-.8 11.6 1" stroke="#121212" strokeWidth="1.7" strokeLinecap="round" fill="none" />
+              <path d="M6.9 12.2c3.1-.8 6.6-.6 9.5.8" stroke="#121212" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+              <path d="M7.7 14.8c2.4-.6 5-.4 7.2.6" stroke="#121212" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+            </svg>
+          </a>
+        </section>
 
-            <div className="flex flex-col justify-between gap-6">
-              <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">Streaming</h3>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <a
-                    className="rounded-full border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:-translate-y-0.5 hover:bg-emerald-100"
-                    href="https://open.spotify.com/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Spotify
-                  </a>
-                  <a
-                    className="rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:-translate-y-0.5 hover:bg-zinc-100"
-                    href="#"
-                  >
-                    Apple Music
-                  </a>
-                  <a
-                    className="rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:-translate-y-0.5 hover:bg-zinc-100"
-                    href="#"
-                  >
-                    YouTube Music
-                  </a>
-                </div>
-              </div>
+        <section className="w-full rounded-3xl border-2 border-black bg-white p-5 text-left shadow-[6px_6px_0px_0px_#000] sm:p-6">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">About this album</h3>
+          <p className="mt-3 text-sm leading-6 text-zinc-700">{displayedRecommendation.albumDescription}</p>
+          <h4 className="mt-4 text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Why this for you</h4>
+          <p className="mt-2 text-sm leading-6 text-zinc-700">{displayedRecommendation.whyForUser}</p>
+        </section>
 
-              <div>
-                <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">How did it land?</h3>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  {ratingOptions.map((option) => {
-                    const isActive = selectedRating === option.id;
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => setSelectedRating(option.id)}
-                        className={`rounded-xl border px-3 py-2 text-left text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
-                          isActive
-                            ? "border-violet-400 bg-violet-100 text-violet-900"
-                            : `border-zinc-200 bg-white text-zinc-700 ${option.colorClass}`
-                        }`}
-                        aria-pressed={isActive}
-                      >
-                        <span className="mr-1.5">{option.emoji}</span>
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="mt-3 min-h-5 text-sm text-zinc-500">
-                  {selectedOption ? `Your vibe check: ${selectedOption.label}` : "Select a rating to log your first impression."}
-                </p>
-              </div>
-
-              <label className="block">
-                <span className="mb-2 block text-sm font-semibold uppercase tracking-wider text-zinc-500">Notes</span>
-                <textarea
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                  rows={3}
-                  placeholder="Short note for future you..."
-                  className="w-full resize-none rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-200"
-                />
-              </label>
-
-              <div className="flex flex-wrap gap-2">
+        <section className="w-full rounded-3xl border-2 border-black bg-white p-5 shadow-[6px_6px_0px_0px_#000] sm:p-6">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Rate it</h3>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {ratingOptions.map((option) => {
+              const isActive = selectedRating === option.id;
+              return (
                 <button
+                  key={option.id}
                   type="button"
-                  onClick={saveRating}
-                  disabled={!canSave}
-                  className="rounded-full border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={() => setSelectedRating(option.id)}
+                  className={`rounded-xl border-2 px-3 py-2 text-left text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
+                    isActive
+                      ? "border-violet-500 bg-violet-100 text-violet-900"
+                      : `border-zinc-200 bg-white text-zinc-700 ${option.colorClass}`
+                  }`}
+                  aria-pressed={isActive}
                 >
-                  {isSaving ? "Saving..." : "Save rating"}
+                  <span className="mr-1.5">{option.emoji}</span>
+                  {option.label}
                 </button>
-                <button
-                  type="button"
-                  onClick={loadHistory}
-                  disabled={!user || isLoadingHistory}
-                  className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isLoadingHistory ? "Loading..." : "Load history"}
-                </button>
-              </div>
-            </div>
+              );
+            })}
+          </div>
+          <label className="mt-4 block text-left">
+            <span className="mb-2 block text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Notes</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              rows={4}
+              placeholder="What stood out?"
+              className="w-full resize-none rounded-xl border-2 border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-200"
+            />
+          </label>
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={saveRating}
+              disabled={!canSave}
+              className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSaving ? "Saving rating..." : "Save rating"}
+            </button>
           </div>
         </section>
 
         {(statusMessage || errorMessage) && (
           <div
-            className={`rounded-xl border px-4 py-2 text-sm ${
+            className={`w-full rounded-2xl border px-4 py-2 text-sm ${
               errorMessage ? "border-rose-300 bg-rose-50 text-rose-700" : "border-emerald-300 bg-emerald-50 text-emerald-700"
             }`}
           >
@@ -331,25 +369,27 @@ export default function Home() {
           </div>
         )}
 
-        <section className="rounded-3xl border border-white/70 bg-white/90 p-5 shadow-xl shadow-violet-100 backdrop-blur sm:p-7">
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">Your rating history</h3>
-          <div className="mt-4 space-y-3">
-            {history.length === 0 ? (
-              <p className="text-sm text-zinc-500">No ratings loaded yet.</p>
-            ) : (
-              history.map((entry) => (
-                <article key={entry.id} className="rounded-xl border border-zinc-200 bg-white p-3">
-                  <p className="text-sm font-semibold text-zinc-800">{entry.albumName}</p>
-                  <p className="text-xs text-zinc-500">Rating: {entry.rating} / 5</p>
-                  <p className="mt-1 text-sm text-zinc-700">{entry.notes || "No notes."}</p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    Updated: {new Date(entry.updatedAt).toLocaleString()}
-                  </p>
-                </article>
-              ))
-            )}
-          </div>
-        </section>
+        <footer className="w-full text-right">
+          {isAuthLoading ? (
+            <span className="text-sm text-zinc-500">Checking session...</span>
+          ) : user ? (
+            <button
+              type="button"
+              onClick={signOutCurrentUser}
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+            >
+              Sign out
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={signInWithGoogle}
+              className="rounded-full border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
+            >
+              Sign in with Google
+            </button>
+          )}
+        </footer>
       </div>
     </main>
   );
