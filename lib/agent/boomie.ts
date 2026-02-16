@@ -32,9 +32,11 @@ function getBoomiePrompt(
   extraInstructions: string[] = [],
   userGoalsContext?: UserGoalsContext,
 ): string {
+  const hasHistory = history.length > 0;
   const listenedAlbums = history.map((entry) => entry.albumName).join(", ");
   const goalLabels = userGoalsContext?.selectedGoals.map((goalId) => getUserGoalLabel(goalId)).join("; ");
   const trimmedGoalNotes = userGoalsContext?.notes.trim() ?? "";
+  const historyPrompt = hasHistory ? getHistoryPrompt(history) : "(none yet)";
 
   return [
     "You are Boomie, an expert music recommendation agent helping users on a long-term musical journey.",
@@ -42,20 +44,23 @@ function getBoomiePrompt(
     "Recommendation rules:",
     "- Use `searchAlbums` only to verify specific album recommendations by album name (and artist when known).",
     "- Return exactly one recommendation and only the schema fields.",
-    "- Never recommend an album already in the user's history.",
     "- Ensure users are listening to a variety of music. You can recommend albums that are very different from what they're history is, or you can help them deepen their existing tastes.",
     "- `tagline` can be personalized, and should be 60 characters or fewer. It should end in ...",
     "- `albumDescription` must be 2-4 sentences and 2000 characters or fewer.",
     "- `whyForUser` must be 1-2 sentences and 800 characters or fewer.",
     "- Do not include markdown, bullet points, emojis, or line breaks in any field.",
     "- Keep language concise and specific.",
-    `- User already listened to: ${listenedAlbums}.`,
+    ...(hasHistory
+      ? ["- Never recommend an album already in the user's history.", `- User already listened to: ${listenedAlbums}.`]
+      : [
+          "- The user has no prior listening history yet. Choose a broadly strong starter album and personalize with user goals and notes when available.",
+        ]),
     ...(goalLabels ? [`- User goals: ${goalLabels}.`] : []),
     ...(trimmedGoalNotes ? [`- User goal notes: ${trimmedGoalNotes}`] : []),
     ...extraInstructions.map((instruction) => `- ${instruction}`),
     "",
     "User rating history:",
-    getHistoryPrompt(history),
+    historyPrompt,
   ].join("\n");
 }
 
@@ -68,11 +73,15 @@ function getVerificationPrompt(
   extraInstructions: string[] = [],
   userGoalsContext?: UserGoalsContext,
 ): string {
+  const hasHistory = history.length > 0;
+
   return [
     getBoomiePrompt(history, extraInstructions, userGoalsContext),
     "",
     "Verification instructions:",
-    "- First decide a concrete album recommendation candidate from the user's history.",
+    ...(hasHistory
+      ? ["- First decide a concrete album recommendation candidate based on the user's rating history."]
+      : ["- First decide a concrete starter album recommendation candidate using user goals/notes and broad appeal."]),
     "- Call `searchAlbums` with an album-title query (optionally include artist), for example: `Brown Sugar D'Angelo`.",
     "- Do not call `searchAlbums` with genre, vibe, mood, or era terms.",
     "- If the search has no suitable album result, choose a different album recommendation and search again.",

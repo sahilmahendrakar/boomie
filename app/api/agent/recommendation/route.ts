@@ -63,19 +63,27 @@ async function generateVerifiedRecommendation(
   uid: string,
   requestId: string,
   extraInstructions?: string[],
-): Promise<CurrentRecommendationInput | null> {
+): Promise<CurrentRecommendationInput> {
   const ratings = await listAlbumRatingsForUser(uid);
   const userGoals = await getUserGoals(uid);
   console.info("[api/recommendation] ratings_loaded", { requestId, uid, ratingsCount: ratings.length });
 
   if (ratings.length === 0) {
-    console.warn("[api/recommendation] no_ratings_found", { requestId, uid });
-    return null;
+    console.info("[api/recommendation] no_ratings_found_continuing_with_cold_start", { requestId, uid });
   }
+
+  const generationExtraInstructions = [
+    ...(extraInstructions ?? []),
+    ...(ratings.length === 0
+      ? [
+          "The user has no prior album ratings yet. Treat this as a cold start and make a strong starter recommendation using any available user goals and notes.",
+        ]
+      : []),
+  ];
 
   console.info("[api/recommendation] generation_started", { requestId });
   const draft = await generateBoomieRecommendation(ratings, {
-    extraInstructions,
+    extraInstructions: generationExtraInstructions.length > 0 ? generationExtraInstructions : undefined,
     userGoalsContext: userGoals
       ? {
           selectedGoals: userGoals.selectedGoals,
@@ -131,13 +139,6 @@ export async function GET(request: NextRequest) {
     }
 
     const generated = await generateVerifiedRecommendation(uid, requestId);
-    if (!generated) {
-      return NextResponse.json(
-        { error: "Add at least one album rating before requesting a recommendation." },
-        { status: 400 },
-      );
-    }
-
     const persisted = await upsertCurrentRecommendationForUser(uid, generated);
     console.info("[api/recommendation][get] generated_and_persisted", {
       requestId,
@@ -172,13 +173,6 @@ export async function POST(request: NextRequest) {
         ? [`Use this optional preference for the next pick only: ${payload.nextPickSteering}`]
         : undefined;
     const generated = await generateVerifiedRecommendation(uid, requestId, extraInstructions);
-    if (!generated) {
-      return NextResponse.json(
-        { error: "Add at least one album rating before requesting a recommendation." },
-        { status: 400 },
-      );
-    }
-
     const persisted = await upsertCurrentRecommendationForUser(uid, generated);
     console.info("[api/recommendation][post] request_succeeded", {
       requestId,
