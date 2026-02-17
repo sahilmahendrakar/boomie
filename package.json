@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.29",
+    "@vercel/analytics": "^1.6.1",
     "ai": "^6.0.86",
     "firebase": "^12.9.0",
     "firebase-admin": "^13.6.1",
