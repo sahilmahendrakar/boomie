@@ -19,16 +19,19 @@ export const metadata: Metadata = {
   icons: {
     icon: "/boomie-icon.png",
   },
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
-  ),
   openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: "https://listenboomie.com",
     title: "Boomie",
     description: "The album companion for curious listeners.",
+    siteName: "Boomie",
     images: [
       {
-        url: "/Boomie%20thumbnail.png",
-        alt: "Boomie thumbnail",
+        url: "https://listenboomie.com/boomie-thumbnail.png",
+        width: 1394,
+        height: 870,
+        alt: "Boomie - The album companion for curious listeners.",
       },
     ],
   },
@@ -36,7 +39,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Boomie",
     description: "The album companion for curious listeners.",
-    images: ["/Boomie%20thumbnail.png"],
+    images: ["/boomie-thumbnal.png"],
   },
 };
 
