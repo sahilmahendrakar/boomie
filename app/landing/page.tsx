@@ -81,10 +81,6 @@ export default function LandingPage() {
     await startGoogleSignIn();
   }
 
-  function handleOpenInBrowser(): void {
-    window.open(window.location.href, "_blank", "noopener,noreferrer");
-  }
-
   async function handleContinueInLinkedIn(): Promise<void> {
     setHasAcknowledgedLinkedInWarning(true);
     setShowLinkedInWarning(false);
@@ -133,21 +129,14 @@ export default function LandingPage() {
               open this page in Safari or Chrome.
             </p>
             <p className="mt-2 text-sm leading-6 text-zinc-700">
-              Tip: in LinkedIn, use the menu and choose to open this page in your default browser.
+              Tip: in LinkedIn, use the menu and choose to open this page in your default browser, then tap Get started.
             </p>
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
               <button
                 type="button"
-                onClick={handleOpenInBrowser}
-                className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800"
-              >
-                Open in browser
-              </button>
-              <button
-                type="button"
                 onClick={handleContinueInLinkedIn}
                 disabled={isSigningIn}
-                className="rounded-full border-2 border-zinc-300 bg-white px-5 py-2 text-sm font-semibold text-zinc-800 transition hover:border-zinc-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Continue here anyway
               </button>
