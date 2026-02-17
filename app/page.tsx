@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { User, onAuthStateChanged } from "firebase/auth";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 import { firebaseClientAuth } from "@/lib/firebase-client";
@@ -292,21 +293,33 @@ export default function Home() {
   }
 
   if (shouldShowRecommendationLoader) {
-    const loaderTitle ="Boomie is digging through record crates...";
+    const loaderTitle = "Boomie is digging through record crates...";
 
     return (
       <main className="min-h-screen bg-zinc-100 px-6 py-10 text-zinc-950 sm:px-10">
         <div className="mx-auto flex min-h-[80vh] w-full max-w-3xl items-center justify-center">
-          <section className="relative w-full rounded-[2rem] border-2 border-black bg-white px-8 py-12 text-center shadow-[10px_10px_0px_0px_#000]">
+          <section
+            className="relative w-full rounded-[2rem] border-2 border-black bg-white px-6 py-8 text-center shadow-[10px_10px_0px_0px_#000] sm:px-8 sm:py-10"
+            role="status"
+            aria-label="Generating recommendation"
+          >
             <div className="pointer-events-none absolute -left-3 -top-3 h-8 w-8 rounded-full border-2 border-black bg-yellow-300 motion-safe:animate-bounce motion-reduce:animate-none" />
             <div className="pointer-events-none absolute -right-2 top-10 h-6 w-6 rounded-full border-2 border-black bg-pink-300 motion-safe:animate-pulse motion-reduce:animate-none" />
             <div className="pointer-events-none absolute -bottom-3 right-8 h-10 w-10 rounded-full border-2 border-black bg-emerald-300 motion-safe:animate-ping motion-reduce:animate-none" />
             <p className="text-sm font-medium uppercase tracking-[0.22em] text-zinc-500">Loading groove</p>
             <h1 className="mt-3 text-3xl font-black leading-tight sm:text-4xl">{loaderTitle}</h1>
-            <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-zinc-700">
+            <Image
+              src="/Boome%20Loading.png"
+              alt="Boomie digging through a crate of vinyl records while loading your next recommendation"
+              width={982}
+              height={717}
+              priority
+              className="mx-auto my-2 h-auto w-full max-w-xs object-contain sm:max-w-sm"
+            />
+            <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-zinc-700">
               Hold tight while Boomie flips through vinyl, checks your vibe history, and lines up your next listen.
             </p>
-            <div className="mt-7 flex items-center justify-center gap-2">
+            <div className="mt-2 flex items-center justify-center gap-2">
               <span className="h-3 w-3 rounded-full border border-black bg-violet-300 motion-safe:animate-bounce motion-reduce:animate-none" />
               <span className="h-3 w-3 rounded-full border border-black bg-sky-300 motion-safe:animate-bounce motion-reduce:animate-none [animation-delay:120ms]" />
               <span className="h-3 w-3 rounded-full border border-black bg-orange-300 motion-safe:animate-bounce motion-reduce:animate-none [animation-delay:240ms]" />
