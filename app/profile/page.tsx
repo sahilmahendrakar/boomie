@@ -16,8 +16,19 @@ type GoalsResponse = {
   error?: string;
 };
 
-type RatingsResponse = {
-  ratings: AlbumRating[];
+type RecommendationHistoryItem = {
+  id: string;
+  recommendationId: string;
+  spotifyAlbumName: string;
+  spotifyAlbumImageUrl: string;
+  spotifyArtistName: string;
+  spotifyArtistImageUrl: string;
+  updatedAt: string;
+  rating: Pick<AlbumRating, "id" | "rating" | "notes" | "updatedAt"> | null;
+};
+
+type HistoryResponse = {
+  history: RecommendationHistoryItem[];
   error?: string;
 };
 
@@ -47,9 +58,12 @@ export default function ProfilePage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [savedGoals, setSavedGoals] = useState<UserGoalId[]>([]);
+  const [savedNotes, setSavedNotes] = useState("");
   const [editableGoals, setEditableGoals] = useState<UserGoalId[]>([]);
   const [editableNotes, setEditableNotes] = useState("");
-  const [ratings, setRatings] = useState<AlbumRating[]>([]);
+  const [isEditingGoals, setIsEditingGoals] = useState(false);
+  const [historyEntries, setHistoryEntries] = useState<RecommendationHistoryItem[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [isSavingGoals, setIsSavingGoals] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -87,12 +101,12 @@ export default function ProfilePage() {
         Authorization: `Bearer ${token}`,
       };
 
-      const [goalsResponse, ratingsResponse] = await Promise.all([
+      const [goalsResponse, historyResponse] = await Promise.all([
         fetch("/api/user/goals", {
           method: "GET",
           headers: commonHeaders,
         }),
-        fetch("/api/ratings", {
+        fetch("/api/recommendations/history", {
           method: "GET",
           headers: commonHeaders,
         }),
@@ -103,17 +117,23 @@ export default function ProfilePage() {
         throw new Error(body.error ?? "Failed to load goals");
       }
 
-      if (!ratingsResponse.ok) {
-        const body = (await ratingsResponse.json()) as RatingsResponse;
+      if (!historyResponse.ok) {
+        const body = (await historyResponse.json()) as HistoryResponse;
         throw new Error(body.error ?? "Failed to load history");
       }
 
       const goalsBody = (await goalsResponse.json()) as GoalsResponse;
-      const ratingsBody = (await ratingsResponse.json()) as RatingsResponse;
+      const historyBody = (await historyResponse.json()) as HistoryResponse;
 
-      setEditableGoals(goalsBody.goals?.selectedGoals ?? []);
-      setEditableNotes(goalsBody.goals?.notes ?? "");
-      setRatings(ratingsBody.ratings);
+      const nextGoals = goalsBody.goals?.selectedGoals ?? [];
+      const nextNotes = goalsBody.goals?.notes ?? "";
+
+      setSavedGoals(nextGoals);
+      setSavedNotes(nextNotes);
+      setEditableGoals(nextGoals);
+      setEditableNotes(nextNotes);
+      setIsEditingGoals(false);
+      setHistoryEntries(historyBody.history);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load profile";
       setErrorMessage(message);
@@ -218,8 +238,13 @@ export default function ProfilePage() {
       }
 
       const body = (await response.json()) as GoalsResponse;
-      setEditableGoals(body.goals?.selectedGoals ?? []);
-      setEditableNotes(body.goals?.notes ?? "");
+      const nextGoals = body.goals?.selectedGoals ?? [];
+      const nextNotes = body.goals?.notes ?? "";
+      setSavedGoals(nextGoals);
+      setSavedNotes(nextNotes);
+      setEditableGoals(nextGoals);
+      setEditableNotes(nextNotes);
+      setIsEditingGoals(false);
       setStatusMessage("Goals updated.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to save goals";
@@ -271,68 +296,160 @@ export default function ProfilePage() {
         </header>
 
         <section className="w-full rounded-3xl border-2 border-black bg-white p-5 shadow-[6px_6px_0px_0px_#000] sm:p-6">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Goals</h2>
-          <div className="mt-3 grid gap-2 sm:grid-cols-3">
-            {USER_GOAL_OPTIONS.map((goal) => {
-              const isActive = selectedGoalSet.has(goal.id);
-              return (
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Goals</h2>
+            {!isEditingGoals ? (
+              <button
+                type="button"
+                onClick={() => setIsEditingGoals(true)}
+                aria-label="Edit goals"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-300 bg-white text-zinc-700 transition hover:bg-zinc-100"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
+                  <path
+                    d="M4 20h4l10-10a1.4 1.4 0 0 0 0-2l-2-2a1.4 1.4 0 0 0-2 0L4 16v4z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            ) : null}
+          </div>
+
+          {isEditingGoals ? (
+            <>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                {USER_GOAL_OPTIONS.map((goal) => {
+                  const isActive = selectedGoalSet.has(goal.id);
+                  return (
+                    <button
+                      key={goal.id}
+                      type="button"
+                      onClick={() => toggleGoal(goal.id)}
+                      className={`rounded-xl border-2 px-3 py-2 text-left text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
+                        isActive
+                          ? "border-violet-500 bg-violet-100 text-violet-900"
+                          : "border-zinc-200 bg-white text-zinc-700 hover:border-violet-300 hover:bg-violet-50"
+                      }`}
+                      aria-pressed={isActive}
+                    >
+                      <span className="mr-1.5" aria-hidden="true">
+                        {goal.emoji}
+                      </span>
+                      {goal.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <label className="mt-4 block text-left">
+                <span className="mb-2 block text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Notes</span>
+                <textarea
+                  value={editableNotes}
+                  onChange={(event) => setEditableNotes(event.target.value)}
+                  rows={4}
+                  placeholder="Anything specific you want Boomie to optimize for?"
+                  className="w-full resize-none rounded-xl border-2 border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-200"
+                />
+              </label>
+              <div className="mt-4 flex justify-end gap-2">
                 <button
-                  key={goal.id}
                   type="button"
-                  onClick={() => toggleGoal(goal.id)}
-                  className={`rounded-xl border-2 px-3 py-2 text-left text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 ${
-                    isActive
-                      ? "border-violet-500 bg-violet-100 text-violet-900"
-                      : "border-zinc-200 bg-white text-zinc-700 hover:border-violet-300 hover:bg-violet-50"
-                  }`}
-                  aria-pressed={isActive}
+                  onClick={() => {
+                    setEditableGoals(savedGoals);
+                    setEditableNotes(savedNotes);
+                    setIsEditingGoals(false);
+                  }}
+                  className="rounded-full border border-zinc-300 bg-white px-5 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100"
                 >
-                  <span className="mr-1.5" aria-hidden="true">
-                    {goal.emoji}
-                  </span>
-                  {goal.label}
+                  Cancel
                 </button>
-              );
-            })}
-          </div>
-          <label className="mt-4 block text-left">
-            <span className="mb-2 block text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Notes</span>
-            <textarea
-              value={editableNotes}
-              onChange={(event) => setEditableNotes(event.target.value)}
-              rows={4}
-              placeholder="Anything specific you want Boomie to optimize for?"
-              className="w-full resize-none rounded-xl border-2 border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 outline-none transition placeholder:text-zinc-400 focus:border-violet-300 focus:ring-2 focus:ring-violet-200"
-            />
-          </label>
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => void handleSaveGoals()}
-              disabled={isSavingGoals}
-              className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSavingGoals ? "Saving..." : "Save goals"}
-            </button>
-          </div>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveGoals()}
+                  disabled={isSavingGoals}
+                  className="rounded-full bg-black px-5 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingGoals ? "Saving..." : "Save goals"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {savedGoals.length ? (
+                  USER_GOAL_OPTIONS.filter((goal) => savedGoals.includes(goal.id)).map((goal) => (
+                    <span
+                      key={goal.id}
+                      className="rounded-full border border-zinc-300 bg-zinc-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-700"
+                    >
+                      <span className="mr-1.5" aria-hidden="true">
+                        {goal.emoji}
+                      </span>
+                      {goal.label}
+                    </span>
+                  ))
+                ) : (
+                  <p className="text-sm text-zinc-600">No goals selected yet.</p>
+                )}
+              </div>
+              <div className="mt-4 rounded-xl border-2 border-zinc-200 bg-zinc-50 px-3 py-2">
+                <p className="mb-1 text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">Notes</p>
+                <p className="text-sm text-zinc-700">{savedNotes || "No notes added."}</p>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="w-full rounded-3xl border-2 border-black bg-white p-5 shadow-[6px_6px_0px_0px_#000] sm:p-6">
           <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">History</h2>
-          {ratings.length ? (
+          {historyEntries.length ? (
             <ul className="mt-3 space-y-3">
-              {ratings.map((rating) => (
-                <li key={rating.id} className="rounded-xl border-2 border-zinc-200 bg-zinc-50 px-4 py-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <p className="text-base font-semibold text-zinc-900">{rating.albumName}</p>
-                    <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">
-                      {ratingLabels[rating.rating]}
-                    </span>
-                  </div>
-                  {rating.notes ? <p className="mt-2 text-sm leading-6 text-zinc-700">{rating.notes}</p> : null}
-                  <p className="mt-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                    Updated {formatDate(rating.updatedAt)}
-                  </p>
+              {historyEntries.map((entry) => (
+                <li key={entry.id}>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/recommendation/${entry.recommendationId}`)}
+                    className="w-full rounded-xl border-2 border-zinc-200 bg-zinc-50 px-4 py-3 text-left transition hover:border-violet-300 hover:bg-violet-50"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white">
+                        {entry.spotifyAlbumImageUrl || entry.spotifyArtistImageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- Dynamic image URLs.
+                          <img
+                            src={entry.spotifyAlbumImageUrl || entry.spotifyArtistImageUrl}
+                            alt={`${entry.spotifyAlbumName} artwork`}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="h-full w-full bg-zinc-200" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="truncate text-base font-semibold text-zinc-900">{entry.spotifyAlbumName}</p>
+                            <p className="truncate text-sm text-zinc-700">{entry.spotifyArtistName || "Unknown Artist"}</p>
+                          </div>
+                          {entry.rating ? (
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">
+                              {ratingLabels[entry.rating.rating]}
+                            </span>
+                          ) : (
+                            <span className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                              Not rated
+                            </span>
+                          )}
+                        </div>
+                        {entry.rating?.notes ? <p className="mt-2 text-sm leading-6 text-zinc-700">{entry.rating.notes}</p> : null}
+                        <p className="mt-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+                          Updated {formatDate(entry.rating?.updatedAt ?? entry.updatedAt)}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
                 </li>
               ))}
             </ul>

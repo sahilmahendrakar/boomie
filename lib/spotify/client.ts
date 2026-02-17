@@ -1,6 +1,7 @@
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 const SPOTIFY_SEARCH_URL = "https://api.spotify.com/v1/search";
 const SPOTIFY_ALBUMS_URL = "https://api.spotify.com/v1/albums";
+const SPOTIFY_ARTISTS_URL = "https://api.spotify.com/v1/artists";
 
 type SpotifyTokenResponse = {
   access_token: string;
@@ -22,7 +23,13 @@ type SpotifySearchResponse = {
 type SpotifyAlbumByIdResponse = {
   id: string;
   name: string;
-  artists: Array<{ name: string }>;
+  artists: Array<{ id: string; name: string }>;
+  images?: Array<{ url: string; width?: number; height?: number }>;
+};
+
+type SpotifyArtistByIdResponse = {
+  id: string;
+  name: string;
   images?: Array<{ url: string; width?: number; height?: number }>;
 };
 
@@ -31,6 +38,7 @@ export type SpotifyAlbumMatch = {
   name: string;
   artistName: string;
   imageUrl: string;
+  artistImageUrl: string;
 };
 
 let cachedSpotifyToken: { value: string; expiresAtMs: number } | null = null;
@@ -147,6 +155,7 @@ async function searchAlbums(query: string): Promise<SpotifyAlbumMatch[]> {
     name: item.name,
     artistName: item.artists[0]?.name ?? "Unknown Artist",
     imageUrl: item.images?.[0]?.url ?? "",
+    artistImageUrl: "",
   }));
   console.info("[spotify/client] search_finished", { query, resultCount: items.length });
   return items;
@@ -179,6 +188,7 @@ export async function searchSpotifyAlbums(query: string, limit = 5): Promise<Spo
     name: item.name,
     artistName: item.artists[0]?.name ?? "Unknown Artist",
     imageUrl: item.images?.[0]?.url ?? "",
+    artistImageUrl: "",
   }));
   console.info("[spotify/client] search_tool_finished", { query, resultCount: items.length });
   return items;
@@ -205,11 +215,14 @@ export async function getSpotifyAlbumById(spotifyAlbumId: string): Promise<Spoti
   }
 
   const payload = (await response.json()) as SpotifyAlbumByIdResponse;
+  const artistId = payload.artists[0]?.id ?? "";
+  const artistImageUrl = artistId ? await getSpotifyArtistImageById(artistId) : "";
   const album = {
     id: payload.id,
     name: payload.name,
     artistName: payload.artists[0]?.name ?? "Unknown Artist",
     imageUrl: payload.images?.[0]?.url ?? "",
+    artistImageUrl,
   };
   console.info("[spotify/client] get_album_finished", { spotifyAlbumId, found: true });
   return album;
@@ -229,4 +242,21 @@ export async function findSpotifyAlbum(albumName: string, artistName: string): P
   const broadMatch = selectBestMatch(broadResults, albumName, artistName);
   console.info("[spotify/client] find_album_finished", { matched: Boolean(broadMatch), spotifyAlbumId: broadMatch?.id });
   return broadMatch;
+}
+
+async function getSpotifyArtistImageById(spotifyArtistId: string): Promise<string> {
+  const token = await getSpotifyAccessToken();
+  const response = await fetch(`${SPOTIFY_ARTISTS_URL}/${encodeURIComponent(spotifyArtistId)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    return "";
+  }
+
+  const payload = (await response.json()) as SpotifyArtistByIdResponse;
+  return payload.images?.[0]?.url ?? "";
 }

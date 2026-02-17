@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateBoomieRecommendation } from "@/lib/agent/boomie";
 import { UnauthorizedError, verifyFirebaseTokenFromRequest } from "@/lib/auth/verify-firebase-token";
 import {
+  createRecommendationHistoryEntryForUser,
   getCurrentRecommendationForUser,
   upsertCurrentRecommendationForUser,
 } from "@/lib/recommendations/repository";
@@ -49,6 +50,7 @@ async function parseRecommendationPostPayload(request: NextRequest): Promise<Rec
 
 function toRecommendationResponse(recommendation: CurrentRecommendationInput) {
   return {
+    recommendationId: recommendation.recommendationId,
     tagline: recommendation.tagline,
     albumDescription: recommendation.albumDescription,
     whyForUser: recommendation.whyForUser,
@@ -56,6 +58,7 @@ function toRecommendationResponse(recommendation: CurrentRecommendationInput) {
     spotifyAlbumId: recommendation.spotifyAlbumId,
     spotifyAlbumName: recommendation.spotifyAlbumName,
     spotifyArtistName: recommendation.spotifyArtistName,
+    spotifyArtistImageUrl: recommendation.spotifyArtistImageUrl,
   };
 }
 
@@ -110,6 +113,7 @@ async function generateVerifiedRecommendation(
   }
 
   return {
+    recommendationId: "",
     tagline: draft.tagline,
     albumDescription: draft.albumDescription,
     whyForUser: draft.whyForUser,
@@ -117,6 +121,7 @@ async function generateVerifiedRecommendation(
     spotifyAlbumId: album.id,
     spotifyAlbumName: album.name,
     spotifyArtistName: album.artistName,
+    spotifyArtistImageUrl: album.artistImageUrl,
   };
 }
 
@@ -130,6 +135,15 @@ export async function GET(request: NextRequest) {
 
     const savedRecommendation = await getCurrentRecommendationForUser(uid);
     if (savedRecommendation) {
+      if (!savedRecommendation.recommendationId) {
+        const historyEntry = await createRecommendationHistoryEntryForUser(uid, savedRecommendation);
+        const updatedCurrent = await upsertCurrentRecommendationForUser(uid, {
+          ...savedRecommendation,
+          recommendationId: historyEntry.id,
+        });
+        return NextResponse.json(toRecommendationResponse(updatedCurrent));
+      }
+
       console.info("[api/recommendation][get] served_saved_recommendation", {
         requestId,
         uid,
@@ -139,7 +153,11 @@ export async function GET(request: NextRequest) {
     }
 
     const generated = await generateVerifiedRecommendation(uid, requestId);
-    const persisted = await upsertCurrentRecommendationForUser(uid, generated);
+    const historyEntry = await createRecommendationHistoryEntryForUser(uid, generated);
+    const persisted = await upsertCurrentRecommendationForUser(uid, {
+      ...generated,
+      recommendationId: historyEntry.id,
+    });
     console.info("[api/recommendation][get] generated_and_persisted", {
       requestId,
       uid,
@@ -173,7 +191,11 @@ export async function POST(request: NextRequest) {
         ? [`Use this optional preference for the next pick only: ${payload.nextPickSteering}`]
         : undefined;
     const generated = await generateVerifiedRecommendation(uid, requestId, extraInstructions);
-    const persisted = await upsertCurrentRecommendationForUser(uid, generated);
+    const historyEntry = await createRecommendationHistoryEntryForUser(uid, generated);
+    const persisted = await upsertCurrentRecommendationForUser(uid, {
+      ...generated,
+      recommendationId: historyEntry.id,
+    });
     console.info("[api/recommendation][post] request_succeeded", {
       requestId,
       uid,

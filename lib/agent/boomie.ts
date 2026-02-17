@@ -47,7 +47,7 @@ function getBoomiePrompt(
     "- Ensure users are listening to a variety of music. You can recommend albums that are very different from what they're history is, or you can help them deepen their existing tastes.",
     "- `tagline` can be personalized, and should be 60 characters or fewer. It should end in ...",
     "- `albumDescription` must be 2-4 sentences and 2000 characters or fewer.",
-    "- `whyForUser` must be 1-2 sentences and 800 characters or fewer.",
+    "- `whyForUser` should be 1-3 sentences and 1200 characters or fewer.",
     "- Do not include markdown, bullet points, emojis, or line breaks in any field.",
     "- Keep language concise and specific.",
     ...(hasHistory
@@ -178,7 +178,7 @@ export async function generateBoomieRecommendation(
 
   const verificationPrompt = getVerificationPrompt(history, options?.extraInstructions, options?.userGoalsContext);
   const verification = await generateText({
-    model: google("gemini-2.5-flash"),
+    model: google("gemini-3-flash-preview"),
     tools,
     stopWhen: stepCountIs(3),
     prepareStep: async ({ stepNumber }) => ({
@@ -203,7 +203,7 @@ export async function generateBoomieRecommendation(
   let output: BoomieRecommendationDraft;
   try {
     const result = await generateText({
-      model: google("gemini-2.5-flash"),
+      model: google("gemini-3-flash-preview"),
       output: Output.object({
         schema: boomieRecommendationSchema,
       }),

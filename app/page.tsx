@@ -28,6 +28,7 @@ const ratingOptions: RatingOption[] = [
 ];
 
 type Recommendation = {
+  recommendationId: string;
   tagline: string;
   albumDescription: string;
   whyForUser: string;
@@ -35,6 +36,7 @@ type Recommendation = {
   spotifyAlbumId: string;
   spotifyAlbumName: string;
   spotifyArtistName: string;
+  spotifyArtistImageUrl?: string;
 };
 
 type UserGoalsResponse = {
@@ -45,6 +47,7 @@ type UserGoalsResponse = {
 };
 
 const defaultRecommendation: Recommendation = {
+  recommendationId: "",
   tagline: "Electronic • 2001 • 14 tracks",
   albumDescription:
     "A sleek, groove-forward electronic classic that balances robot-pop hooks with dancefloor momentum.",
@@ -53,6 +56,7 @@ const defaultRecommendation: Recommendation = {
   spotifyAlbumId: "",
   spotifyAlbumName: "Discovery",
   spotifyArtistName: "Daft Punk",
+  spotifyArtistImageUrl: "",
 };
 
 export default function Home() {
@@ -77,7 +81,8 @@ export default function Home() {
   const spotifyAlbumUrl = displayedRecommendation.spotifyAlbumId
     ? `https://open.spotify.com/album/${displayedRecommendation.spotifyAlbumId}`
     : "https://open.spotify.com/";
-  const shouldShowLoader = isAuthLoading || !user || hasGoals !== true || isRecommendationLoading;
+  const shouldShowAuthLoader = isAuthLoading || !user || hasGoals !== true;
+  const shouldShowRecommendationLoader = isRecommendationLoading;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(firebaseClientAuth, (nextUser) => {
@@ -202,6 +207,11 @@ export default function Home() {
           albumName: displayedRecommendation.spotifyAlbumName,
           rating: selectedOption.id,
           notes,
+          recommendationId: displayedRecommendation.recommendationId,
+          spotifyAlbumId: displayedRecommendation.spotifyAlbumId,
+          spotifyAlbumImageUrl: displayedRecommendation.spotifyAlbumImageUrl ?? "",
+          spotifyArtistName: displayedRecommendation.spotifyArtistName,
+          spotifyArtistImageUrl: displayedRecommendation.spotifyArtistImageUrl ?? "",
         }),
       });
 
@@ -267,7 +277,21 @@ export default function Home() {
     void fetchCurrentRecommendation();
   }, [user, hasGoals, recommendation, isInitialRecommendationLoading, fetchCurrentRecommendation]);
 
-  if (shouldShowLoader) {
+  if (shouldShowAuthLoader) {
+    return (
+      <main className="min-h-screen bg-zinc-100 px-6 py-10 text-zinc-950 sm:px-10">
+        <div className="mx-auto flex min-h-[80vh] w-full max-w-3xl items-center justify-center">
+          <div className="flex items-center justify-center gap-2" role="status" aria-label="Loading">
+            <span className="h-3 w-3 rounded-full border border-black bg-violet-300 motion-safe:animate-bounce motion-reduce:animate-none" />
+            <span className="h-3 w-3 rounded-full border border-black bg-sky-300 motion-safe:animate-bounce motion-reduce:animate-none [animation-delay:120ms]" />
+            <span className="h-3 w-3 rounded-full border border-black bg-orange-300 motion-safe:animate-bounce motion-reduce:animate-none [animation-delay:240ms]" />
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (shouldShowRecommendationLoader) {
     const loaderTitle ="Boomie is digging through record crates...";
 
     return (
@@ -280,7 +304,7 @@ export default function Home() {
             <p className="text-sm font-medium uppercase tracking-[0.22em] text-zinc-500">Loading groove</p>
             <h1 className="mt-3 text-3xl font-black leading-tight sm:text-4xl">{loaderTitle}</h1>
             <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-zinc-700">
-              Hold tight while Boomie flips through cosmic vinyl, checks your vibe history, and lines up a deliciously
+              Hold tight while Boomie flips through vinyl, checks your vibe history, and lines up a
               good next listen.
             </p>
             <div className="mt-7 flex items-center justify-center gap-2">
