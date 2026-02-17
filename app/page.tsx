@@ -304,8 +304,7 @@ export default function Home() {
             <p className="text-sm font-medium uppercase tracking-[0.22em] text-zinc-500">Loading groove</p>
             <h1 className="mt-3 text-3xl font-black leading-tight sm:text-4xl">{loaderTitle}</h1>
             <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-zinc-700">
-              Hold tight while Boomie flips through vinyl, checks your vibe history, and lines up a
-              good next listen.
+              Hold tight while Boomie flips through vinyl, checks your vibe history, and lines up your next listen.
             </p>
             <div className="mt-7 flex items-center justify-center gap-2">
               <span className="h-3 w-3 rounded-full border border-black bg-violet-300 motion-safe:animate-bounce motion-reduce:animate-none" />
